@@ -1,0 +1,249 @@
+# Cài đặt và sử dụng Pfsense 
+
+![](images/pfsense0000.png)
+
+- VPNServer 
+- Multiwan 
+
+Mô hình cơ bản 
+
+![](images/pfsense0001.png)
+
+Ip Planning 
+
+![](images/pfsense0002.png)
+
+- Pfsense sẽ chạy trên KVM 
+- Đấu nối xuống Sw-L2 chia VLAN phía dưới 
+- Trên máy ảo pfsense, thực hiện đặt ip dùng là gateway cho các vlan
+
+
+# Cài đặt trên KVM 
+
+![](images/pfsense0003.gif)
+
+Đổi IP theo IP Planning
+
+![](images/pfsense0004.png)
+![](images/pfsense0005.png)
+![](images/pfsense0006.png)
+
+
+# Cấu hình cơ bản 
+
+Đăng nhập với tài khoản `admin/pfsense` và cấu hình
+
+![](images/pfsense0007.gif)
+
+Cấu hình `Disable checksum ofload`
+
+![](images/pfsense0008.png)
+![](images/pfsense0009.png)
+![](images/pfsense0010.png)
+
+> Mục đích là để sử dụng được với device model là “virtio”. Nếu không check vào tùy chọn này, sau này khi tạo vpn mode tap sẽ gặp lỗi máy ping được nhưng không thể ssh.
+
+Cấu hình bổ sung `rules` cho WAN tránh bị disconnect khi thêm interface
+
+![](images/pfsense0011.png)
+![](images/pfsense0012.png)
+![](images/pfsense0013.png)
+![](images/pfsense0014.png)
+![](images/pfsense0015.png)
+
+Cấu hình thêm interface 
+![](images/pfsense0016.gif)
+
+Kết quả kiểm tra trên Cli
+![](images/pfsense0017.png)
+
+# Cấu hình VPN mode TAP
+
+## Tạo Certificate
+
+Truy cập `System/Certificate Manager/CA` -> `Add`
+
+![](images/pfsense0018.png)
+![](images/pfsense0019.png)
+![](images/pfsense0020.png)
+
+Tại tab `System/Certificate Manager/Certificate`, tạo cho server VPN
+
+![](images/pfsense0021.png)
+![](images/pfsense0022.png)
+![](images/pfsense0023.png)
+![](images/pfsense0024.png)
+
+## Tạo user VPN 
+Truy cập `System/UserManager`
+
+![](images/pfsense0025.png)
+![](images/pfsense0026.png)
+![](images/pfsense0027.png)
+![](images/pfsense0028.png)
+
+Truy cập `System/Packet Manager` cài đặt thêm Plugin `openvpn-client-export`
+![](images/pfsense0029.png)
+![](images/pfsense0030.png)
+![](images/pfsense0031.png)
+
+Truy cập `VPN/OpenVPN/Server`, click `Add` để tạo VPN server
+![](images/pfsense0032.png)
+
+Khai báo các thông tin về mode kết nối:
+- Server mode: Remote Access (SSL/TLS + User Auth)
+- Device mode: tap
+- Interface: WAN
+- Local port: 1198 (tùy ý lựa chọn port)
+
+![](images/pfsense0033.png)
+
+Khai báo các thông tin về mã hóa
+- TLS Configuration: chọn sử dụng TLS key
+- Peer Certificate Authority: chọn CA cho hệ thống đã tạo trước đó (server-ca)
+- Server certificate: chọn cert cho server được tạo (server-cert)
+- Enable NCP: lựa chọn sử dụng mã hóa đường truyền giữa Client và Server, sử dụng các giải thuật mặc định là AES-256-GCM và  AES-128-GCM
+- Auth digest algorithm: lựa chọn giải - thuật xác thực kênh truyền là SHA256
+
+
+![](images/pfsense0034.png)
+![](images/pfsense0035.png)
+
+Cấu hình Tunnel như sau : 
+- Bridge Interface : Chọn VLAN24, các IP của user khi VPN sẽ nhận IP dải VLAN24
+- Server Bridge DHCP Start – End : Dải IP cấp cho user VPN
+- Inter-client communication : Cho phép các client giao tiếp với nhau qua VPN
+- Duplicate Connection : Cho phép các client cùng tên có thể kết nối VPN
+
+![](images/pfsense0036.png)
+![](images/pfsense0037.png)
+
+Cấu hình Routing : 
+- DNS Server 1 & 2 : Đặt DNS 8.8.8.8 và 8.8.4.4
+- Custom option : Cho phép các dải mạng LAN được phép kết nối với nhau. 
+```sh 
+push "route 10.10.24.0 255.255.255.0";push "route 10.10.25.0 255.255.255.0";push "route 10.10.26.0 255.255.255.0"
+```
+
+![](images/pfsense0038.png)
+![](images/pfsense0039.png)
+![](images/pfsense0040.png)
+
+Truy cập `Interfaces` cấu hình thêm Interface OpenVPN, tạo bridge mới và add 2 interface VPN và VLAN24 vào bridge
+
+![](images/pfsense0041.gif)
+
+Truy cập `Firewall` Bổ sung rules firewall cho VPN và lưu lại
+
+![](images/pfsense0042.png)
+
+Truy cập `Firewall/Rules/OPENVPN` add rule cho phép lưu lượng đi qua
+
+![](images/pfsense0043.png)
+![](images/pfsense0044.png)
+
+Config NAT Rule : Cho phép inter VLAN, các VLAN có thể giao tiếp với nhau. 
+
+Tại mục : `Firewall/NAT/Outbound`, chọn Add thêm NAT Rule. Chú ý chọn dạng `Hybrid`
+
+![](images/pfsense0045.png)
+![](images/pfsense0046.png)
+![](images/pfsense0047.png)
+
+Thêm Interface được NAT dải VLAN24
+
+![](images/pfsense0048.png)
+
+## Export OPENVPN Config và sử dụng 
+
+Tại tab `VPN/OpenVPN/ClientExport`, khai báo các thông số:
+- Remote Access Server: lựa chọn OpenVPN server và port 1198
+- Hostname Resolution: lựa chọn khai báo Interface IP của WAN 
+
+![](images/pfsense0049.png)
+
+Lựa chọn và tải config về máy
+
+![](images/pfsense0050.png)
+
+Tiến hành vpn và xem ip được nhận, ping thử các host cùng dải.
+
+![](images/pfsense0051.png)
+![](images/pfsense0052.png)
+![](images/pfsense0053.png)
+![](images/pfsense0054.png)
+![](images/pfsense0055.png)
+![](images/pfsense0056.png)
+![](images/pfsense0057.png)
+![](images/pfsense0058.png)
+![](images/pfsense0059.png)
+![](images/pfsense0060.png)
+![](images/pfsense0061.png)
+![](images/pfsense0062.png)
+![](images/pfsense0063.png)
+![](images/pfsense0064.png)
+![](images/pfsense0065.png)
+![](images/pfsense0066.png)
+![](images/pfsense0067.png)
+![](images/pfsense0068.png)
+![](images/pfsense0069.png)
+![](images/pfsense0070.png)
+![](images/pfsense0071.png)
+![](images/pfsense0072.png)
+![](images/pfsense0073.png)
+![](images/pfsense0074.png)
+![](images/pfsense0075.png)
+![](images/pfsense0076.png)
+![](images/pfsense0077.png)
+![](images/pfsense0078.png)
+![](images/pfsense0079.png)
+![](images/pfsense0080.png)
+![](images/pfsense0081.png)
+![](images/pfsense0082.png)
+![](images/pfsense0083.png)
+![](images/pfsense0084.png)
+![](images/pfsense0085.png)
+![](images/pfsense0086.png)
+![](images/pfsense0087.png)
+![](images/pfsense0088.png)
+![](images/pfsense0089.png)
+![](images/pfsense0090.png)
+![](images/pfsense0091.png)
+![](images/pfsense0092.png)
+![](images/pfsense0093.png)
+![](images/pfsense0094.png)
+![](images/pfsense0095.png)
+![](images/pfsense0096.png)
+![](images/pfsense0097.png)
+![](images/pfsense0098.png)
+![](images/pfsense0099.png)
+![](images/pfsense0100.png)
+![](images/pfsense0101.png)
+![](images/pfsense0102.png)
+![](images/pfsense0103.png)
+![](images/pfsense0104.png)
+![](images/pfsense0105.png)
+![](images/pfsense0106.png)
+![](images/pfsense0107.png)
+![](images/pfsense0108.png)
+![](images/pfsense0109.png)
+![](images/pfsense0110.png)
+![](images/pfsense0111.png)
+![](images/pfsense0112.png)
+![](images/pfsense0113.png)
+![](images/pfsense0114.png)
+![](images/pfsense0115.png)
+![](images/pfsense0116.png)
+![](images/pfsense0117.png)
+![](images/pfsense0118.png)
+![](images/pfsense0119.png)
+![](images/pfsense0120.png)
+![](images/pfsense0121.png)
+![](images/pfsense0122.png)
+![](images/pfsense0123.png)
+![](images/pfsense0124.png)
+![](images/pfsense0125.png)
+![](images/pfsense0126.png)
+![](images/pfsense0127.png)
+![](images/pfsense0128.png)
+![](images/pfsense0129.png)
